@@ -4,10 +4,11 @@ This document provides a deep dive into the technical architecture, design philo
 
 ## 1. Core Principles
 
-The system is built on three pillars essential for quantitative research:
+The system is built on four pillars essential for quantitative research:
 - **Reproducibility**: Every data point is versioned and checksummed.
 - **Scalability**: Hierarchical partitioning allows handling multi-terabyte datasets on consumer-grade hardware.
 - **Interoperability**: Standard formats (Parquet, SQLite, Arrow) ensure zero-copy integration with the modern data science stack.
+- **Centralized Data Server**: Acts as a unified data hub, exposing REST and Python APIs to serve multiple research and production consumers simultaneously.
 
 ## 2. Storage Architecture
 
@@ -68,8 +69,14 @@ class ProprietaryFeedConnector(BaseConnector):
         pass
 ```
 
-### 6.2 Orchestration
-While the project includes **Prefect** workflows for basic automation, the library is designed as a "Sidecar" and can be easily integrated into other orchestrators like Airflow, Dagster, or custom Cron systems.
+### 6.2 Data Server & API Layer
+Beyond a local library, `dl-datalake` functions as a **centralized Data Server**. The integrated FastAPI layer enables:
+- **Remote Access**: Serve data to multiple researchers or automated agents across a network.
+- **Language Agnosticism**: Seamless integration with non-Python systems via JSON/REST.
+- **Streaming Previews**: Efficient pagination and previewing of massive Parquet datasets without full file transfers.
+
+### 6.3 Orchestration
+While the project includes **Prefect** workflows for basic automation, the library is designed as a "Sidecar" or a standalone service and can be easily integrated into other orchestrators like Airflow, Dagster, or custom Cron systems.
 
 ---
 
