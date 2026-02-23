@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .coverage
 *.db
+manifest.db
 data/
 .env
 .venv

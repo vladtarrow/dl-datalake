@@ -3,6 +3,7 @@ data/
 *.parquet
 *.db
 *.sqlite
+manifest.db
 
 # Python
 __pycache__/
@@ -20,4 +21,4 @@ build/
 .coverage
 htmlcov/
 coverage.xml
-research_notes/
+# research_notes/

@@ -1,109 +1,105 @@
 # DL-Datalake REST API Documentation
 
-Полная документация по REST API для работы с dl-datalake.
+Full REST API reference for dl-datalake.
 
-## Содержание
+## Table of Contents
 
-1. [Обзор](#обзор)
-2. [Технические детали](#технические-детали)
-3. [Основной API](#основной-api)
+1. [Overview](#overview)
+2. [Technical Details](#technical-details)
+3. [Core API](#core-api)
 4. [UI API](#ui-api)
-5. [Примеры использования](#примеры-использования)
-6. [Коды ошибок](#коды-ошибок)
+5. [Usage Examples](#usage-examples)
+6. [Error Codes](#error-codes)
 
 ---
 
-## Обзор
+## Overview
 
-В проекте доступны два API сервера:
+The project exposes two API servers:
 
-1. **Основной API** (`api_server.py`) - базовый REST API
-   - Базовый URL: `http://localhost:8000`
-   - Запуск: `uvicorn dl_datalake.client.api_server:app --reload`
+1. **Core API** (`api_server.py`) — base REST API
+   - Base URL: `http://localhost:8000`
+   - Start: `uvicorn dl_datalake.client.api_server:app --reload`
 
-2. **UI API** (`dl-datalake-ui/backend`) - расширенный API с дополнительными возможностями
-   - Базовый URL: `http://localhost:8000`
-   - Префикс: `/api/v1`
-   - Запуск: `uvicorn main:app --reload --port 8000`
+2. **UI API** (`dl-datalake-ui/backend`) — extended API with additional capabilities
+   - Base URL: `http://localhost:8000`
+   - Prefix: `/api/v1`
+   - Start: `uvicorn main:app --reload --port 8000`
 
----
-
-## Технические детали
-
-### Лимиты и Rate Limiting
-
-Система автоматически обрабатывает ограничения бирж (Rate Limits):
-*   **Ошибка 429 (Too Many Requests)**: При получении ошибки `ccxt.DDoSProtection` система делает паузу (обычно 30 секунд) и повторяет запрос.
-*   **Retry Logic**: Встроена логика повторных попыток (до 3-х раз) для этапа пробинга даты листинга и основного цикла загрузки.
-*   **IP Bans (418)**: Постоянное игнорирование Retry-After может привести к бану IP. Система старается этого избегать, соблюдая рекомендации биржи.
-
-### Формат данных: Parquet
-
-Все рыночные данные хранятся в формате **Apache Parquet**. Это бинарный колоночный формат, который обеспечивает:
-*   **Сжатие**: Данные занимают в 5-10 раз меньше места, чем CSV.
-*   **Скорость**: Чтение только нужных колонок (например, только `close` для индикаторов) без загрузки всего файла.
-*   **Метаданные**: В каждом файле хранятся Min/Max значения колонок, что позволяет пропускать ненужные блоки данных при фильтрации.
-
-**Внутренняя структура:**
-*   **Header**: Магическое слово `PAR1`.
-*   **Row Groups**: Данные разбиты на группы строк (для параллельной обработки).
-*   **Column Chunks**: Колонки хранятся физически отдельно внутри группы.
-*   **Footer**: Содержит схему и статистику для оптимизации запросов.
+Interactive documentation is always available at:
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
 
 ---
 
-## Основной API
+## Technical Details
 
-Базовые endpoints для работы с данными.
+### Rate Limiting
+
+The system automatically handles exchange rate limits:
+- **429 (Too Many Requests)**: On `ccxt.DDoSProtection`, the system pauses (30 s) and retries.
+- **Retry logic**: Up to 3 retries for listing-date probing and up to 5 retries for the main download loop.
+- **IP Bans (418)**: Continuously ignoring Retry-After can result in an IP ban. The system respects exchange recommendations.
+
+### Data Format: Parquet
+
+All market data is stored in **Apache Parquet** format — a binary columnar format that provides:
+- **Compression**: 5–10× smaller than CSV.
+- **Speed**: Read only required columns (e.g., `close` for indicators) without loading the whole file.
+- **Metadata**: Min/Max column statistics stored per file for predicate pushdown.
+
+**Internal structure:**
+- **Header**: Magic bytes `PAR1`.
+- **Row Groups**: Data split into groups for parallel processing.
+- **Column Chunks**: Columns stored physically separate within each row group.
+- **Footer**: Schema and statistics for query optimization.
+
+---
+
+## Core API
+
+Base endpoints for data access.
 
 ### 1. Health Check
 
 **GET** `/health`
 
-Проверка работоспособности API.
+Check API health.
 
-**Пример запроса:**
+**Example:**
 ```bash
 curl "http://localhost:8000/health"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "status": "ok"
-}
+{ "status": "ok" }
 ```
 
 ---
 
-### 2. Список записей в манифесте
+### 2. List Manifest Entries
 
 **GET** `/list`
 
-Получить список всех записей в манифесте с фильтрацией.
+List all entries in the manifest with optional filters.
 
-**Параметры запроса:**
-- `symbol` (optional): Фильтр по символу (BTCUSDT, ETHUSDT, etc.)
-- `data_type` (optional): Фильтр по типу данных (raw, ticks, agg, alt, или имя feature_set)
-- `exchange` (optional): Фильтр по бирже (BINANCE, BYBIT, etc.)
-- `market` (optional): Фильтр по типу рынка (SPOT, FUTURES, etc.)
+**Query parameters:**
+- `symbol` (optional): Filter by symbol (e.g. `BTCUSDT`)
+- `data_type` (optional): Filter by type (`raw`, `ticks`, `agg`, `alt`, or feature set name)
+- `exchange` (optional): Filter by exchange (e.g. `BINANCE`)
+- `market` (optional): Filter by market type (`SPOT`, `FUTURES`, etc.)
 
-**Пример запроса:**
+**Examples:**
 ```bash
-# Все записи для BTCUSDT
+# All entries for BTCUSDT
 curl "http://localhost:8000/list?symbol=BTCUSDT"
 
-# Только raw данные для SPOT рынка
+# Raw SPOT data only
 curl "http://localhost:8000/list?symbol=BTCUSDT&data_type=raw&market=SPOT"
-
-# Все записи с биржи BINANCE
-curl "http://localhost:8000/list?exchange=BINANCE"
-
-# Все записи для FUTURES рынка
-curl "http://localhost:8000/list?market=FUTURES"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 [
   {
@@ -113,87 +109,61 @@ curl "http://localhost:8000/list?market=FUTURES"
     "market": "SPOT",
     "path": "data/BINANCE/SPOT/BTCUSDT/raw/1m/2024/01/15/BTCUSDT_1m_20240115.parquet",
     "type": "raw"
-  },
-  {
-    "id": 2,
-    "symbol": "BTCUSDT",
-    "exchange": "BINANCE",
-    "market": "SPOT",
-    "path": "data/features/rsi_indicators/1.0.0/features.parquet",
-    "type": "rsi_indicators"
   }
 ]
 ```
 
 ---
 
-### 3. Чтение данных
+### 3. Read Data
 
 **GET** `/read`
 
-Прочитать рыночные данные за указанный период.
+Read market data for a given time range.
 
-**Параметры запроса:**
-- `exchange` (required): Биржа (BINANCE, BYBIT, etc.)
-- `symbol` (required): Торговый символ (BTCUSDT, ETHUSDT, etc.)
-- `start` (required): Начальная дата в формате ISO (YYYY-MM-DD)
-- `end` (required): Конечная дата в формате ISO (YYYY-MM-DD)
-- `data_type` (optional): Тип данных (raw, agg, ticks, alt). По умолчанию "raw"
+**Query parameters:**
+- `exchange` (required): Exchange (e.g. `BINANCE`)
+- `symbol` (required): Symbol (e.g. `BTCUSDT`)
+- `start` (required): Start date `YYYY-MM-DD`
+- `end` (required): End date `YYYY-MM-DD`
+- `data_type` (optional): Data type (`raw`, `agg`, `ticks`, `alt`). Default: `"raw"`
 
-**Пример запроса:**
+**Example:**
 ```bash
-curl "http://localhost:8000/read?exchange=BINANCE&symbol=BTCUSDT&start=2024-01-01&end=2024-01-31&data_type=raw"
+curl "http://localhost:8000/read?exchange=BINANCE&symbol=BTCUSDT&start=2024-01-01&end=2024-01-31"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 [
-  {
-    "ts": 1704067200000,
-    "open": 42000.0,
-    "high": 42500.0,
-    "low": 41800.0,
-    "close": 42300.0,
-    "volume": 1234.56
-  },
-  {
-    "ts": 1704067260000,
-    "open": 42300.0,
-    "high": 42400.0,
-    "low": 42200.0,
-    "close": 42350.0,
-    "volume": 987.65
-  }
+  { "ts": 1704067200000, "open": 42000.0, "high": 42500.0, "low": 41800.0, "close": 42300.0, "volume": 1234.56 },
+  { "ts": 1704067260000, "open": 42300.0, "high": 42400.0, "low": 42200.0, "close": 42350.0, "volume": 987.65 }
 ]
 ```
 
 ---
 
-## Feature Store API (Основной API)
+## Feature Store API (Core API)
 
-### 4. Список всех фич
+### 4. List All Features
 
 **GET** `/features`
 
-Получить список всех фич с версиями.
+List all registered features with version info.
 
-**Параметры запроса:**
-- `exchange` (optional): Фильтр по бирже
-- `symbol` (optional): Фильтр по символу
-- `market` (optional): Фильтр по типу рынка
-- `feature_set` (optional): Фильтр по имени набора фич
-- `version` (optional): Фильтр по версии
+**Query parameters:**
+- `exchange` (optional)
+- `symbol` (optional)
+- `market` (optional)
+- `feature_set` (optional)
+- `version` (optional)
 
-**Пример запроса:**
+**Example:**
 ```bash
-# Все фичи для BTCUSDT
 curl "http://localhost:8000/features?symbol=BTCUSDT"
-
-# Фичи только для SPOT рынка
-curl "http://localhost:8000/features?symbol=BTCUSDT&market=SPOT"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 [
   {
@@ -212,27 +182,20 @@ curl "http://localhost:8000/features?symbol=BTCUSDT&market=SPOT"
 
 ---
 
-### 5. Список feature sets с версиями
+### 5. List Feature Sets with Versions
 
 **GET** `/features/sets`
 
-Получить сгруппированный список всех feature sets с доступными версиями.
+Get a grouped list of all feature sets and their available versions.
 
-**Параметры запроса:**
-- `exchange` (optional): Фильтр по бирже
-- `symbol` (optional): Фильтр по символу
-- `market` (optional): Фильтр по типу рынка
+**Query parameters:** `exchange`, `symbol`, `market` (all optional)
 
-**Пример запроса:**
+**Example:**
 ```bash
-# Все feature sets для BTCUSDT
 curl "http://localhost:8000/features/sets?symbol=BTCUSDT"
-
-# Feature sets только для SPOT рынка
-curl "http://localhost:8000/features/sets?symbol=BTCUSDT&market=SPOT"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 {
   "feature_sets": [
@@ -242,13 +205,6 @@ curl "http://localhost:8000/features/sets?symbol=BTCUSDT&market=SPOT"
       "symbol": "BTCUSDT",
       "market": "SPOT",
       "versions": ["2.0.0", "1.0.0"]
-    },
-    {
-      "name": "backtest_reports",
-      "exchange": "BINANCE",
-      "symbol": "BTCUSDT",
-      "market": "SPOT",
-      "versions": ["2024.01.15", "2024.01.10"]
     }
   ]
 }
@@ -256,21 +212,21 @@ curl "http://localhost:8000/features/sets?symbol=BTCUSDT&market=SPOT"
 
 ---
 
-### 6. Загрузка фичи
+### 6. Upload Feature
 
 **POST** `/features/upload`
 
-Загрузить файл фичи в Feature Store.
+Upload a feature file to the Feature Store.
 
-**Параметры запроса (multipart/form-data):**
-- `file` (required): Файл для загрузки (любой формат)
-- `exchange` (required): Биржа
-- `market` (required): Тип рынка (SPOT, FUTURES, etc.)
-- `symbol` (required): Торговый символ
-- `feature_set` (required): Имя набора фич
-- `version` (optional): Версия (по умолчанию "1.0.0")
+**Body (multipart/form-data):**
+- `file` (required): File to upload (any format)
+- `exchange` (required)
+- `market` (required)
+- `symbol` (required)
+- `feature_set` (required): Feature set name
+- `version` (optional): Default `"1.0.0"`
 
-**Пример запроса (curl):**
+**Example (curl):**
 ```bash
 curl -X POST "http://localhost:8000/features/upload" \
   -F "file=@./my_features.parquet" \
@@ -281,50 +237,38 @@ curl -X POST "http://localhost:8000/features/upload" \
   -F "version=1.0.0"
 ```
 
-**Пример запроса (Python):**
+**Example (Python):**
 ```python
 import requests
 
-url = "http://localhost:8000/features/upload"
-files = {"file": open("my_features.parquet", "rb")}
-data = {
-    "exchange": "BINANCE",
-    "market": "SPOT",
-    "symbol": "BTCUSDT",
-    "feature_set": "rsi_indicators",
-    "version": "1.0.0"
-}
-
-response = requests.post(url, files=files, data=data)
+response = requests.post(
+    "http://localhost:8000/features/upload",
+    files={"file": open("my_features.parquet", "rb")},
+    data={"exchange": "BINANCE", "market": "SPOT", "symbol": "BTCUSDT",
+          "feature_set": "rsi_indicators", "version": "1.0.0"},
+)
 print(response.json())
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "status": "success",
-  "version": "1.0.0",
-  "message": "Feature rsi_indicators v1.0.0 uploaded successfully"
-}
+{ "status": "success", "version": "1.0.0", "message": "Feature rsi_indicators v1.0.0 uploaded successfully" }
 ```
 
 ---
 
-### 7. Получение метаданных фичи
+### 7. Get Feature Metadata
 
 **GET** `/features/{feature_id}`
 
-Получить метаданные конкретной фичи по ID.
+Get metadata for a specific feature by its manifest ID.
 
-**Параметры пути:**
-- `feature_id` (required): ID записи в манифесте
-
-**Пример запроса:**
+**Example:**
 ```bash
 curl "http://localhost:8000/features/123"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 {
   "id": 123,
@@ -336,101 +280,74 @@ curl "http://localhost:8000/features/123"
   "file_path": "data/features/rsi_indicators/1.0.0/features.parquet",
   "file_size_bytes": 1024000,
   "checksum": "abc123...",
-  "last_modified": "2024-01-15T10:30:00",
-  "created_at": "2024-01-15T10:30:00",
-  "metadata": {
-    "feature_set": "rsi_indicators"
-  }
+  "created_at": "2024-01-15T10:30:00"
 }
 ```
 
 ---
 
-### 8. Скачивание фичи
+### 8. Download Feature
 
 **GET** `/features/{feature_id}/download`
 
-Скачать файл фичи по ID.
+Download a feature file by ID.
 
-**Параметры пути:**
-- `feature_id` (required): ID записи в манифесте
-
-**Пример запроса:**
 ```bash
 curl "http://localhost:8000/features/123/download" -o downloaded_feature.parquet
 ```
 
-**Ответ:** Бинарный файл с заголовками для скачивания.
+Response: binary file stream with download headers.
 
 ---
 
-### 9. Удаление фичи
+### 9. Delete Feature
 
 **DELETE** `/features/{feature_id}`
 
-Удалить фичу по ID (удаляет файл и запись в манифесте).
+Delete a feature by ID (removes both the file and the manifest entry).
 
-**Параметры пути:**
-- `feature_id` (required): ID записи в манифесте
-
-**Пример запроса:**
 ```bash
 curl -X DELETE "http://localhost:8000/features/123"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "status": "success",
-  "message": "Feature rsi_indicators v1.0.0 deleted"
-}
+{ "status": "success", "message": "Feature rsi_indicators v1.0.0 deleted" }
 ```
 
 ---
 
 ## UI API
 
-Расширенный API с дополнительными возможностями. Все endpoints имеют префикс `/api/v1`.
+Extended API for the web interface. All endpoints are prefixed with `/api/v1`.
 
-### 11. Список датасетов
+### 10. List Datasets
 
 **GET** `/api/v1/datasets`
 
-Получить список всех датасетов (рыночные данные + фичи) с пагинацией и фильтрацией.
+List all datasets (market data + features) with pagination and filtering.
 
-**Параметры запроса:**
-- `exchange` (optional): ID биржи (например, `BINANCE`, `BYBIT`). **Примечание**: обычно в ВЕРХНЕМ РЕГИСТРЕ.
-- `symbol` (optional): Торговый символ (например, `BTCUSDT`). **Примечание**: обычно в ВЕРХНЕМ РЕГИСТРЕ.
-- `market` (optional): Тип рынка (`SPOT`, `FUTURES`, `LINEAR`, `SWAP`).
-- `data_type` (optional): Тип данных (`raw`, `ticks`, `agg`, `alt`) или имя набора фич.
-- `limit` (optional): Сколько записей вернуть за один запрос. По умолчанию `20`.
-- `offset` (optional): Смещение для пагинации (пропускает первые N записей). По умолчанию `0`.
+**Query parameters:**
+- `exchange` (optional): e.g. `BINANCE` — **case-sensitive, use UPPER CASE**
+- `symbol` (optional): e.g. `BTCUSDT`
+- `market` (optional): `SPOT`, `FUTURES`, `LINEAR`, `SWAP`
+- `data_type` (optional): `raw`, `ticks`, `agg`, `alt`, or feature set name
+- `limit` (optional): Records per page. Default `20`
+- `offset` (optional): Pagination offset. Default `0`
 
 > [!TIP]
-> **Регистр имеет значение**: В базе данных значения `exchange`, `symbol` и `market` хранятся в верхнем регистре. Если поиск ничего не выдает, попробуйте `exchange=BINANCE` вместо `exchange=binance`.
+> Values for `exchange`, `symbol`, and `market` are stored in UPPER CASE in the database. If a query returns no results, try `exchange=BINANCE` instead of `exchange=binance`.
 
-**Примеры запросов:**
+**Examples:**
 ```bash
-# Найти все RAW данные для BTC на Binance
+# All raw BTC data on Binance
 curl "http://localhost:8000/api/v1/datasets?exchange=BINANCE&symbol=BTCUSDT&data_type=raw"
 
-# Показать следующую страницу (записи с 21 по 40)
+# Next page (records 21–40)
 curl "http://localhost:8000/api/v1/datasets?exchange=BINANCE&offset=20&limit=20"
-
-# Получить сразу 100 записей
-curl "http://localhost:8000/api/v1/datasets?exchange=BINANCE&limit=100"
 ```
 
-**Пример запроса:**
-```bash
-# Все датасеты для BTCUSDT
-curl "http://localhost:8000/api/v1/datasets?symbol=BTCUSDT&limit=50&offset=0"
-
-# Только SPOT датасеты
-curl "http://localhost:8000/api/v1/datasets?symbol=BTCUSDT&market=SPOT"
-```
-
-**Пример ответа:**
+**Response:**
 ```json
 {
   "datasets": [
@@ -454,109 +371,79 @@ curl "http://localhost:8000/api/v1/datasets?symbol=BTCUSDT&market=SPOT"
 
 ---
 
-### 11. Предпросмотр датасета
+### 11. Preview Dataset
 
 **GET** `/api/v1/datasets/{dataset_id}/preview`
 
-Получить предпросмотр данных датасета (первые N строк).
+Get a preview of a dataset (first N rows).
 
-**Параметры пути:**
-- `dataset_id` (required): ID датасета
+**Query parameters:**
+- `limit` (optional): Number of rows. Default `100`
+- `offset` (optional): Row offset. Default `0`
 
-**Параметры запроса:**
-- `limit` (optional): Количество строк для предпросмотра (по умолчанию 100)
-- `offset` (optional): Смещение (по умолчанию 0)
-
-**Пример запроса:**
+**Example:**
 ```bash
 curl "http://localhost:8000/api/v1/datasets/1/preview?limit=50"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 {
   "columns": ["ts", "open", "high", "low", "close", "volume"],
   "rows": [
-    {
-      "ts": 1704067200000,
-      "open": 42000.0,
-      "high": 42500.0,
-      "low": 41800.0,
-      "close": 42300.0,
-      "volume": 1234.56
-    }
+    { "ts": 1704067200000, "open": 42000.0, "high": 42500.0, "low": 41800.0, "close": 42300.0, "volume": 1234.56 }
   ],
   "total_rows": 44640,
-  "metadata": {
-    "timeframe": "1m"
-  }
+  "metadata": { "timeframe": "1m" }
 }
 ```
 
 ---
 
-### 12. Экспорт датасета
+### 12. Export Dataset
 
 **GET** `/api/v1/datasets/{dataset_id}/export`
 
-Экспортировать конкретный сегмент данных в формат CSV (совместимый с торговыми терминалами).
+Export a dataset segment as a CSV file (compatible with trading terminals).
 
-**Параметры пути:**
-- `dataset_id` (required): ID датасета
-
-**Пример запроса:**
 ```bash
 curl "http://localhost:8000/api/v1/datasets/1/export"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 {
   "status": "success",
   "filename": "dl_BTCUSDT_BINANCE_SPOT.csv.txt",
-  "path": "/path/to/trading-research/export/BINANCE/SPOT/dl_BTCUSDT_BINANCE_SPOT.csv.txt"
+  "path": "/path/to/export/BINANCE/SPOT/dl_BTCUSDT_BINANCE_SPOT.csv.txt"
 }
 ```
 
 ---
 
-### 13. Удаление датасета
+### 13. Delete Dataset
 
 **DELETE** `/api/v1/datasets/{dataset_id}`
 
-Удалить датасет по ID.
+Delete a dataset by ID.
 
-**Параметры пути:**
-- `dataset_id` (required): ID датасета
-
-**Пример запроса:**
 ```bash
 curl -X DELETE "http://localhost:8000/api/v1/datasets/1"
 ```
 
-**Пример ответа:**
-```json
-{
-  "status": "success"
-}
-```
+**Response:** `{ "status": "success" }`
 
 ---
 
 ## Ingestion API (UI API)
 
-### 14. Статус загрузок
+### 14. Ingestion Status
 
 **GET** `/api/v1/ingest/status`
 
-Получить статус всех активных загрузок данных.
+Get status of all active downloads.
 
-**Пример запроса:**
-```bash
-curl "http://localhost:8000/api/v1/ingest/status"
-```
-
-**Пример ответа:**
+**Response:**
 ```json
 {
   "binance:spot:BTCUSDT:raw": {
@@ -573,13 +460,13 @@ curl "http://localhost:8000/api/v1/ingest/status"
 
 ---
 
-### 15. Загрузка истории с биржи
+### 15. Download Historical Data
 
 **POST** `/api/v1/ingest/download`
 
-Запустить загрузку исторических данных с биржи.
+Start a historical data download from an exchange.
 
-**Тело запроса (JSON):**
+**Body (JSON):**
 ```json
 {
   "exchange": "binance",
@@ -592,45 +479,36 @@ curl "http://localhost:8000/api/v1/ingest/status"
 }
 ```
 
-**Параметры:**
-- `exchange` (required): Биржа (binance, bybit, etc.)
-- `symbol` (required): Торговый символ
-- `market` (optional): Тип рынка (spot, future, etc.)
-- `timeframe` (optional): Таймфрейм (по умолчанию "1m")
-- `data_type` (optional): Тип данных (raw, funding, both)
-- `start_date` (optional): Дата начала (YYYY-MM-DD)
-- `full_history` (optional): Если true, игнорирует `start_date` и качает всё с даты листинга.
+**Parameters:**
+- `exchange` (required): Exchange ID (binance, bybit, etc.)
+- `symbol` (required): Trading symbol
+- `market` (optional): Market type (spot, future, etc.)
+- `timeframe` (optional): Candle timeframe. Default `"1m"`
+- `data_type` (optional): `raw`, `funding`, or `both`
+- `start_date` (optional): `YYYY-MM-DD`
+- `full_history` (optional): If `true`, ignores `start_date` and downloads from listing date
 
-**Пример запроса:**
+**Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/ingest/download" \
   -H "Content-Type: application/json" \
-  -d '{
-    "exchange": "binance",
-    "symbol": "BTCUSDT",
-    "market": "spot",
-    "start_date": "2024-01-01"
-  }'
+  -d '{"exchange": "binance", "symbol": "BTCUSDT", "market": "spot", "start_date": "2024-01-01"}'
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "task_id": "dl_BTCUSDT",
-  "status": "pending",
-  "message": "Queued download for BTCUSDT from binance"
-}
+{ "task_id": "dl_BTCUSDT", "status": "pending", "message": "Queued download for BTCUSDT from binance" }
 ```
 
 ---
 
-### 16. Массовая загрузка
+### 16. Bulk Download
 
 **POST** `/api/v1/ingest/bulk-download`
 
-Запустить загрузку для нескольких символов одновременно.
+Start downloads for multiple symbols simultaneously.
 
-**Тело запроса (JSON):**
+**Body:**
 ```json
 {
   "exchange": "binance",
@@ -642,141 +520,119 @@ curl -X POST "http://localhost:8000/api/v1/ingest/download" \
 }
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "task_id": "bulk_dl",
-  "status": "pending",
-  "message": "Queued 2 downloads from binance"
-}
+{ "task_id": "bulk_dl", "status": "pending", "message": "Queued 2 downloads from binance" }
 ```
 
 ---
 
-### 17. Список бирж
+### 17. List Exchanges
 
 **GET** `/api/v1/ingest/exchanges`
 
-Получить список всех доступных бирж (из CCXT).
+List all available exchanges (from CCXT).
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "exchanges": [
-    { "id": "binance", "name": "Binance" },
-    { "id": "bybit", "name": "Bybit" }
-  ]
-}
+{ "exchanges": [{ "id": "binance", "name": "Binance" }, { "id": "bybit", "name": "Bybit" }] }
 ```
 
 ---
 
-### 18. Список рынков биржи
+### 18. List Markets for Exchange
 
 **GET** `/api/v1/ingest/exchanges/{exchange_id}/markets`
 
-Получить список доступных типов рынков для биржи.
+List available market types for an exchange.
 
 ---
 
-### 19. Список символов биржи
+### 19. List Symbols for Exchange
 
 **GET** `/api/v1/ingest/exchanges/{exchange_id}/symbols`
 
-Получить список всех активных символов на бирже для конкретного типа рынка.
+List all active symbols on an exchange.
 
-**Параметры запроса:**
-- `market`: (optional) Тип рынка (по умолчанию "spot")
+**Query parameters:**
+- `market` (optional): Market type. Default `"spot"`
 
 ---
 
-### 20. Загрузка локального файла
+### 20. Upload Local File
 
 **POST** `/api/v1/ingest/file`
 
-Загрузить данные из локального CSV файла в систему.
+Import data from a local CSV file into the lake.
 
 ---
 
-### 21. Агрегированный экспорт
+### 21. Aggregated Export (full ticker)
 
 **GET** `/api/v1/export/{exchange}/{symbol}`
 
-Найти все фрагменты данных (1m raw) для тикера, склеить их в правильном порядке и экспортировать в один большой CSV файл.
+Find all data fragments (1m raw) for a ticker, merge them in order, and export as one large CSV file.
 
-**Параметры пути:**
-- `exchange`: ID биржи
-- `symbol`: Символ (если содержит `/`, замените на `_` или передайте как есть, API обработает)
+**Query parameters:**
+- `market` (optional): Market type
 
-**Параметры запроса:**
-- `market`: (optional) Тип рынка
-
-**Пример запроса:**
+**Example:**
 ```bash
 curl "http://localhost:8000/api/v1/export/binance/BTCUSDT?market=spot"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
 {
   "status": "success",
   "filename": "dl_BTCUSDT_BINANCE_SPOT.csv.txt",
-  "path": "/path/to/trading-research/export/BINANCE/SPOT/dl_BTCUSDT_BINANCE_SPOT.csv.txt",
+  "path": "/path/to/export/BINANCE/SPOT/dl_BTCUSDT_BINANCE_SPOT.csv.txt",
   "rows_exported": 525600
 }
 ```
 
 ---
 
-### 22. Удаление истории
+### 22. Delete History
 
 **DELETE** `/api/v1/ingest/exchanges/{exchange_id}/markets/{market_id}/history`
 
-Полное удаление данных и записей в манифесте для конкретного символа.
+Fully delete data and manifest entries for a specific symbol.
 
-**Параметры пути:**
-- `exchange_id`: ID биржи
-- `market_id`: Тип рынка
+**Query parameters:**
+- `symbol` (required)
+- `data_type` (optional)
 
-**Параметры запроса:**
-- `symbol`: (required) Торговый символ
-- `data_type`: (optional) Тип данных (raw, funding, etc.)
-
-**Пример запроса:**
+**Example:**
 ```bash
 curl -X DELETE "http://localhost:8000/api/v1/ingest/exchanges/binance/markets/spot/history?symbol=BTCUSDT"
 ```
 
-**Пример ответа:**
+**Response:**
 ```json
-{
-  "status": "success",
-  "deleted_entries": 12,
-  "deleted_files": 12,
-  "message": "Deleted 12 entries and 12 files for BTCUSDT"
-}
+{ "status": "success", "deleted_entries": 12, "deleted_files": 12, "message": "Deleted 12 entries and 12 files for BTCUSDT" }
 ```
 
 ---
 
 ## Feature Store API (UI API)
 
-Все endpoints для работы с фичами также доступны в UI API с префиксом `/api/v1/features`:
+All feature endpoints are also available in the UI API under `/api/v1/features`:
 
-- `GET /api/v1/features` - Список всех фич (с пагинацией)
-- `GET /api/v1/features/sets` - Список feature sets с версиями
-- `POST /api/v1/features/upload` - Загрузка фичи
-- `GET /api/v1/features/{id}` - Метаданные фичи
-- `GET /api/v1/features/{id}/download` - Скачивание фичи
-- `DELETE /api/v1/features/{id}` - Удаление фичи
+- `GET /api/v1/features` — list all features (with pagination)
+- `GET /api/v1/features/sets` — list feature sets with versions
+- `POST /api/v1/features/upload` — upload a feature file
+- `GET /api/v1/features/{id}` — get feature metadata
+- `GET /api/v1/features/{id}/download` — download a feature file
+- `DELETE /api/v1/features/{id}` — delete a feature
 
-См. раздел [Feature Store API (Основной API)](#feature-store-api-основной-api) для подробностей.
+See [Feature Store API (Core API)](#feature-store-api-core-api) for details.
 
 ---
 
-## Примеры использования
+## Usage Examples
 
-### Полный цикл работы с данными
+### Full Data Workflow
 
 ```python
 import requests
@@ -784,18 +640,18 @@ import polars as pl
 
 BASE_URL = "http://localhost:8000/api/v1"
 
-# 1. Получить список бирж
+# 1. List exchanges
 exchanges = requests.get(f"{BASE_URL}/ingest/exchanges").json()
-print(f"Доступно бирж: {len(exchanges['exchanges'])}")
+print(f"Available exchanges: {len(exchanges['exchanges'])}")
 
-# 2. Получить список символов
+# 2. List symbols
 symbols = requests.get(
     f"{BASE_URL}/ingest/exchanges/binance/symbols",
     params={"market": "spot"}
 ).json()
-print(f"Символов на Binance: {len(symbols['symbols'])}")
+print(f"Symbols on Binance: {len(symbols['symbols'])}")
 
-# 3. Запустить загрузку данных
+# 3. Start download
 download_req = {
     "exchange": "binance",
     "symbol": "BTCUSDT",
@@ -806,111 +662,92 @@ download_req = {
 response = requests.post(f"{BASE_URL}/ingest/download", json=download_req)
 print(response.json())
 
-# 4. Проверить статус загрузки
+# 4. Check download status
 status = requests.get(f"{BASE_URL}/ingest/status").json()
 print(status)
 
-# 5. Получить список загруженных датасетов
+# 5. List downloaded datasets
 datasets = requests.get(
     f"{BASE_URL}/datasets",
     params={"symbol": "BTCUSDT", "limit": 100}
 ).json()
-print(f"Найдено датасетов: {datasets['total']}")
+print(f"Datasets found: {datasets['total']}")
 
-# 6. Предпросмотр данных
+# 6. Preview data
 if datasets['datasets']:
     preview = requests.get(
         f"{BASE_URL}/datasets/{datasets['datasets'][0]['id']}/preview",
         params={"limit": 10}
     ).json()
-    print(f"Колонки: {preview['columns']}")
-    print(f"Всего строк: {preview['total_rows']}")
+    print(f"Columns: {preview['columns']}")
+    print(f"Total rows: {preview['total_rows']}")
 
-# 7. Загрузить фичи
+# 7. Upload features
 with open("my_features.parquet", "rb") as f:
-    files = {"file": f}
-    data = {
-        "exchange": "BINANCE",
-        "market": "SPOT",
-        "symbol": "BTCUSDT",
-        "feature_set": "rsi_indicators",
-        "version": "1.0.0"
-    }
-    response = requests.post(f"{BASE_URL}/features/upload", files=files, data=data)
+    response = requests.post(
+        f"{BASE_URL}/features/upload",
+        files={"file": f},
+        data={"exchange": "BINANCE", "market": "SPOT", "symbol": "BTCUSDT",
+              "feature_set": "rsi_indicators", "version": "1.0.0"},
+    )
     print(response.json())
 
-# 8. Получить список всех фич
-features = requests.get(
-    f"{BASE_URL}/features",
-    params={"symbol": "BTCUSDT"}
-).json()
-print(f"Найдено фич: {features['total']}")
+# 8. List features
+features = requests.get(f"{BASE_URL}/features", params={"symbol": "BTCUSDT"}).json()
+print(f"Features found: {features['total']}")
 
-# 9. Получить feature sets с версиями
-sets = requests.get(
-    f"{BASE_URL}/features/sets",
-    params={"symbol": "BTCUSDT"}
-).json()
+# 9. List feature sets with versions
+sets = requests.get(f"{BASE_URL}/features/sets", params={"symbol": "BTCUSDT"}).json()
 for fs in sets["feature_sets"]:
-    print(f"{fs['name']}: версии {fs['versions']}")
+    print(f"{fs['name']}: versions {fs['versions']}")
 
-# 10. Скачать фичу
-if features['datasets']:
+# 10. Download a feature
+if features.get('datasets'):
     feature_id = features['datasets'][0]['id']
     response = requests.get(f"{BASE_URL}/features/{feature_id}/download")
     with open("downloaded.parquet", "wb") as f:
         f.write(response.content)
-    print("Фича скачана")
+    print("Feature downloaded")
 ```
 
 ---
 
-## Коды ошибок
+## Error Codes
 
-### Успешные ответы
+### Success
 
-- `200 OK` - Успешный запрос
-- `201 Created` - Ресурс создан
+| Code | Meaning |
+|---|---|
+| `200 OK` | Request succeeded |
+| `201 Created` | Resource created |
 
-### Ошибки клиента
+### Client Errors
 
-- `400 Bad Request` - Неверные параметры запроса
-- `404 Not Found` - Ресурс не найден
-- `422 Unprocessable Entity` - Ошибка валидации данных
+| Code | Meaning |
+|---|---|
+| `400 Bad Request` | Invalid request parameters |
+| `404 Not Found` | Resource not found |
+| `422 Unprocessable Entity` | Validation error |
 
-### Ошибки сервера
+### Server Errors
 
-- `500 Internal Server Error` - Внутренняя ошибка сервера
+| Code | Meaning |
+|---|---|
+| `500 Internal Server Error` | Unexpected server error |
 
-**Пример ошибки:**
+**Error response format:**
 ```json
-{
-  "detail": "Feature not found"
-}
+{ "detail": "Feature not found" }
 ```
 
 ---
 
-## Примечания
+## Notes
 
-1. **Форматы дат**: Все даты в формате ISO 8601 (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)
-2. **Пагинация**: UI API поддерживает `limit` и `offset` для больших списков
-3. **Форматы файлов**: Поддерживаются любые форматы (Parquet, CSV, PDF, JSON, etc.)
-4. **Версионирование**: Версия фичи - это строка (например, "1.0.0", "v2", "2024.01.15")
-5. **Асинхронные операции**: Загрузка данных с бирж выполняется асинхронно, используйте `/ingest/status` для отслеживания
-6. **Checksums**: Автоматически вычисляются при загрузке фич для проверки целостности
-7. **CORS**: UI API настроен для работы с фронтендом (CORS разрешен для всех источников)
-
----
-
-## Автоматическая документация
-
-При запуске сервера доступна интерактивная документация:
-
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
-
-Там можно:
-- Просмотреть все endpoints
-- Протестировать API прямо в браузере
-- Увидеть схемы запросов и ответов
+1. **Date formats**: All dates use ISO 8601 (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`)
+2. **Pagination**: UI API supports `limit` and `offset` for large result sets
+3. **File formats**: Feature Store accepts any format (Parquet, CSV, JSON, etc.)
+4. **Versioning**: Feature version is a free-form string (e.g. `"1.0.0"`, `"v2"`, `"2024.01.15"`)
+5. **Async operations**: Exchange downloads run asynchronously — poll `/ingest/status` to track progress
+6. **Checksums**: Automatically computed on feature upload for integrity verification
+7. **CORS**: UI API allows all origins for local development
