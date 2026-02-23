@@ -1,0 +1,23 @@
+# Data storage
+data/
+*.parquet
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*.venv
+.env
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+.ruff_cache/
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+research_notes/

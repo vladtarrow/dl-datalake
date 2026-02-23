@@ -1,0 +1,6 @@
+fastapi>=0.104.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+python-multipart
+# We assume dependencies for dl_datalake are already installed in the environment
+# or we can list them here if we want a self-contained venv, but for now minimal.
